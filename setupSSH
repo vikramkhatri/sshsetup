@@ -1,0 +1,70 @@
+#!/bin/bash
+
+source ./setenvvars
+
+set +x
+
+islive() {
+  target=$1
+  count=$(ping -c 1 $target | grep -E "icmp.*time" | wc -l)
+  if [ $count -eq 0 ] ; then
+     echo 1;
+  else
+     echo 0;
+  fi
+}
+
+if [[ -z $PS_TOPOLOGY_HOST ]] ; then
+   echo "Environment variable PS_TOPOLOGY_HOST is not set. Exiting ..."
+   exit 1
+fi
+
+i=0
+LINES=$(echo $PS_TOPOLOGY_HOST | sed 's/;/\n/g')
+for line in $LINES
+do
+  VALUES=$(echo $line | sed 's/:/\n/g')
+  j=0
+  for value in $VALUES
+  do
+     if [[ $j -eq 0 ]] ; then
+       pstype[$i]=$value
+     elif [[ $j -eq 1 ]] ; then
+       hosts[$i]=$value
+     else
+       ipaddr[$i]=$value
+     fi
+     ((j++))
+  done
+  ((i++))
+done
+
+sorted_hosts=($(echo "${hosts[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+
+while true
+do
+   live=1
+   for server in ${sorted_hosts[@]};
+   do
+     live=$(islive $server)
+     if [ $live -eq 1 ] ; then
+        break;
+     fi
+   done
+   if [ $live -eq 0 ] ; then
+      echo ========================================
+      echo "All are alive now. Sleep 3 then genSSH"
+      echo ========================================
+      sleep 3
+      su - db2psc -c genSSH
+      genSSH
+      touch $SETUP_SSH_DONE
+      sleep 2
+      break
+   else
+      echo ========================================
+      echo "Waiting for all to come alive"
+      echo ========================================
+      sleep 10
+   fi
+done
