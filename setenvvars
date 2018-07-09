@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Set here variables for consistency in shell scripting and those which are likely to change
+export SSH="/bin/ssh -q -o PreferredAuthentications=publickey \
+            -o StrictHostKeyChecking=no"
+export SCP="/bin/scp -q -o StrictHostKeyChecking=no"
 
-export CP=/bin/cp
-export RM=/bin/rm
 
 export PS_LEADER=node01
 export PUBLIC_DOMAIN=ibm.local
