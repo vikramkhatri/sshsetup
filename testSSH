@@ -1,0 +1,59 @@
+#!/bin/bash
+#
+# Author : Vikram Khatri
+#
+# Purpose: SSH round robin test
+#
+
+set +x
+
+if [ $# -lt 1 ] ; then
+    echo "Usage: $0 inventoryFile"
+    echo "Inventory file must have IP address, FQDN, Short Name and Password"
+    echo "Inventory file parameters are space delimited"
+    exit 1
+fi
+
+INVFILE=$1
+
+echo ========================================================
+i=0
+while read IPADDR LNAME SNAME PWD
+do
+  ipaddr[$i]=$IPADDR
+  lname[$i]=$LNAME
+  sname[$i]=$SNAME
+  ((i++))
+done < $INVFILE
+
+echo ========================================================
+for ((i = 0; i < ${#ipaddr[@]}; ++i))
+do
+  h1=${ipaddr[$i]}
+  for ((j = 0; j < ${#ipaddr[@]}; ++j))
+  do
+    h2=${ipaddr[$j]}
+    printf "Test %-20s %-20s : " "$h1" "$h2" 
+    ssh ${h1} "ssh ${h2} uptime -p"
+  done
+done
+for ((i = 0; i < ${#ipaddr[@]}; ++i))
+do
+  h1=${lname[$i]}
+  for ((j = 0; j < ${#ipaddr[@]}; ++j))
+  do
+    h2=${lname[$j]}
+    printf "Test %-20s %-20s : " "$h1" "$h2" 
+    ssh ${h1} "ssh ${h2} uptime -p"
+  done
+done
+for ((i = 0; i < ${#ipaddr[@]}; ++i))
+do
+  h1=${sname[$i]}
+  for ((j = 0; j < ${#ipaddr[@]}; ++j))
+  do
+    h2=${sname[$j]}
+    printf "Test %-20s %-20s : " "$h1" "$h2" 
+    ssh ${h1} "ssh ${h2} uptime -p"
+  done
+done

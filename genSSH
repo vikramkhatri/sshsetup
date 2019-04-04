@@ -1,93 +1,91 @@
 #!/bin/bash
+#
+# Author : Vikram Khatri
+#
+# Purpose: Generate SSH keys
+#
 
-echo Sourcing ~/.setenvvars 
-source ~/.setenvvars
-
-echo ===================================================
-echo Generate ssh keys and exchange them with hosts
-echo ===================================================
-
-if [[ -z $PS_TOPOLOGY_HOST ]] ; then
-   echo Environment variable PS_TOPOLOGY_HOST is not set. Exiting ...
-   exit 1
-fi
-
-USERNM=$(whoami)
-USERGP=$(id -g -n $USERNM)
-USERHM=$(eval echo "~$USERNM")
-SSH="/bin/ssh -q -o StrictHostKeyChecking=no"
-SCP="/bin/scp -q -o StrictHostKeyChecking=no"
-
-USERPW=$(cat /var/ps/$USERNM | base64 -d)
-
-if [[ "$USERPW" == "" ]]; then
-  echo Invalid User specified $USERNM. Exiting...
-  exit 1
-fi
-
-echo USER NAME  = $USERNM
-echo USER GROUP = $USERGP
-echo USER HOME  = $USERHM
-KNOWN_HOSTS=/tmp/known_hosts.$USERNM
-AUTH_KEYS=/tmp/authorized_keys.$USERNM
-
-TGT_KNOWN_HOSTS=known_hosts
-TGT_AUTH_KEYS=authorized_keys
-
-echo Build server list
-i=0
-LINES=$(echo $PS_TOPOLOGY_HOST | sed 's/;/\n/g')
-for line in $LINES
-do
-  VALUES=$(echo $line | sed 's/:/\n/g')
-  j=0
-  for value in $VALUES
-  do
-     if [[ $j -eq 0 ]] ; then
-       pstype[$i]=$value
-     elif [[ $j -eq 1 ]] ; then
-       hosts[$i]=$value
-     else
-       ipaddr[$i]=$value
-     fi
-     ((j++))
-  done
-  ((i++))
-done
-
-sorted_hosts=($(echo "${hosts[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
-sorted_ipaddr=($(echo "${ipaddr[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
-
-> $KNOWN_HOSTS
-for ((i = 0; i < ${#sorted_hosts[@]}; ++i));
-do
-  ssh-keyscan ${sorted_hosts[i]}.$PUBLIC_DOMAIN,\
-              ${sorted_hosts[i]},${sorted_ipaddr[i]}
-done >> $KNOWN_HOSTS
-set -x
-echo Generate ssh keys
-for ((i = 0; i < ${#sorted_hosts[@]}; ++i));
-do
-  server=${sorted_hosts[$i]}
-  exp $USERPW ${SSH} $server rm -fr ${USERHM}/.ssh
-  var=$(printf '/bin/ssh-keygen -b 2048 -t rsa -N "" -f ~/.ssh/id_rsa')
-  exp $USERPW ${SSH} $server $var
-  exp $USERPW ${SCP} ${USERNM}@$server:${USERHM}/.ssh/id_rsa.pub /tmp/id_rsa.$server.pub
-done
 set +x
-> $AUTH_KEYS
-for server in ${sorted_hosts[@]};
-do
-  cat /tmp/id_rsa.$server.pub >> $AUTH_KEYS
-  rm -f /tmp/id_rsa.$server.pub
-done
 
-chmod 600 $AUTH_KEYS
-for server in ${sorted_hosts[@]};
-do
-  exp $USERPW ${SCP} $KNOWN_HOSTS ${USERNM}@$server:${USERHM}/.ssh/$TGT_KNOWN_HOSTS
-  exp $USERPW ${SCP} $AUTH_KEYS ${USERNM}@$server:${USERHM}/.ssh/$TGT_AUTH_KEYS
-done
+if ! rpm -qa | grep sshpass 2>&1 > /dev/null; then
+   echo Package sshpass not found. Installing ...
+   yum -y install sshpass
+fi
 
-/bin/rm -f $AUTH_KEYS
+if [ $# -lt 1 ] ; then
+    echo "Usage: $0 inventoryFile"
+    echo "Inventory file must have IP address, FQDN, Short Name and Password"
+    echo "Inventory file parameters are space delimited"
+    exit 1
+fi
+
+INVFILE=$1
+SKIP=${2:-false}
+KNOWN_HOSTS=/tmp/known_hosts
+OPTIONS="-o StrictHostKeyChecking=no" 
+
+touch $KNOWN_HOSTS
+> $KNOWN_HOSTS
+echo ========================================================
+i=0
+echo Generate hosts keys 
+while read IPADDR LNAME SNAME PWD
+do
+  ipaddr[$i]=$IPADDR
+  lname[$i]=$LNAME
+  sname[$i]=$SNAME
+  pwd[$i]=$PWD
+  ((i++))
+  if ! $SKIP ; then
+    ssh-keyscan -t rsa $IPADDR,$LNAME,$SNAME >> $KNOWN_HOSTS 2>/dev/null
+  fi
+  echo $PWD > /tmp/$SNAME.kxy
+done < $INVFILE
+
+IPHOST=$(echo $SSH_CONNECTION | awk '{print $3}')
+echo "Current IP Addr : " $IPHOST
+echo "ip list         : " ${ipaddr[@]}
+echo "long name list  : " ${lname[@]}
+echo "short name list : " ${sname[@]}
+
+echo ========================================================
+for ((i = 0; i < ${#ipaddr[@]}; ++i));
+do
+  ipaddress=${ipaddr[$i]}
+  longname=${lname[$i]}
+  shortname=${sname[$i]}
+  password=${pwd[$i]}
+
+  if ! /usr/bin/sshpass -f /tmp/${shortname}.kxy /usr/bin/ssh $OPTIONS $ipaddress stat ~/.ssh/id_rsa > /dev/null 2>&1; then 
+     echo Generating ssh keys at $shortname
+     /usr/bin/sshpass -f /tmp/${shortname}.kxy /usr/bin/ssh $OPTIONS $ipaddress ssh-keygen -t rsa -N \'\' -f ~/.ssh/id_rsa  
+  fi
+  echo Run ssh-copy-id : copy key $IPHOST to $shortname
+  /usr/bin/sshpass -f /tmp/${shortname}.kxy ssh-copy-id -i ~/.ssh/id_rsa $OPTIONS $ipaddress
+  if ! $SKIP; then
+    /bin/scp $OPTIONS $KNOWN_HOSTS $ipaddress:~/.ssh
+    /bin/scp $OPTIONS genSSH $ipaddress:/tmp
+    /bin/scp $OPTIONS $INVFILE $ipaddress:/tmp
+  fi
+done
 /bin/rm -f $KNOWN_HOSTS
+
+
+if ! $SKIP ; then
+  for ((i = 1; i < ${#ipaddr[@]}; ++i));
+  do
+    ipaddress=${ipaddr[$i]}
+    shortname=${sname[$i]}
+    password=${pwd[$i]}
+
+    echo Run Remote ssh-copy-id : copy key from $IPHOST to $shortname
+    /usr/bin/ssh $OPTIONS $ipaddress "/tmp/genSSH /tmp/$INVFILE true"
+  done
+
+  for ((i = 0; i < ${#ipaddr[@]}; ++i));
+  do
+    ipaddress=${ipaddr[$i]}
+    /usr/bin/ssh $OPTIONS $ipaddress "/bin/rm -f /tmp/${shortname}.kxy"
+    /usr/bin/ssh $OPTIONS $ipaddress "/bin/rm -f $INVFILE"
+  done
+fi
