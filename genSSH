@@ -20,15 +20,16 @@ if [ $# -lt 1 ] ; then
 fi
 
 INVFILE=$1
+BINVFILE=$(basename $INVFILE)
 SKIP=${2:-false}
 KNOWN_HOSTS=/tmp/known_hosts
-OPTIONS="-o StrictHostKeyChecking=no" 
+OPTIONS="-o StrictHostKeyChecking=no"
 
 touch $KNOWN_HOSTS
 > $KNOWN_HOSTS
 echo ========================================================
 i=0
-echo Generate hosts keys 
+echo Generate hosts keys
 while read IPADDR LNAME SNAME PWD
 do
   ipaddr[$i]=$IPADDR
@@ -39,7 +40,7 @@ do
   if ! $SKIP ; then
     ssh-keyscan -t rsa $IPADDR,$LNAME,$SNAME >> $KNOWN_HOSTS 2>/dev/null
   fi
-  echo $PWD > /tmp/$SNAME.kxy
+  echo $PWD > /tmp/${USER}.$SNAME.kxy
 done < $INVFILE
 
 IPHOST=$(echo $SSH_CONNECTION | awk '{print $3}')
@@ -56,12 +57,12 @@ do
   shortname=${sname[$i]}
   password=${pwd[$i]}
 
-  if ! /usr/bin/sshpass -f /tmp/${shortname}.kxy /usr/bin/ssh $OPTIONS $ipaddress stat ~/.ssh/id_rsa > /dev/null 2>&1; then 
+  if ! /usr/bin/sshpass -f /tmp/${USER}.${shortname}.kxy /usr/bin/ssh $OPTIONS $ipaddress stat ~/.ssh/id_rsa > /dev/null 2>&1; then
      echo Generating ssh keys at $shortname
-     /usr/bin/sshpass -f /tmp/${shortname}.kxy /usr/bin/ssh $OPTIONS $ipaddress ssh-keygen -t rsa -N \'\' -f ~/.ssh/id_rsa  
+     /usr/bin/sshpass -f /tmp/${USER}.${shortname}.kxy /usr/bin/ssh $OPTIONS $ipaddress ssh-keygen -t rsa -N \'\' -f ~/.ssh/id_rsa
   fi
   echo Run ssh-copy-id : copy key $IPHOST to $shortname
-  /usr/bin/sshpass -f /tmp/${shortname}.kxy ssh-copy-id -i ~/.ssh/id_rsa $OPTIONS $ipaddress
+  /usr/bin/sshpass -f /tmp/${USER}.${shortname}.kxy ssh-copy-id -i ~/.ssh/id_rsa $OPTIONS $ipaddress
   if ! $SKIP; then
     /bin/scp $OPTIONS $KNOWN_HOSTS $ipaddress:~/.ssh
     /bin/scp $OPTIONS genSSH $ipaddress:/tmp
@@ -79,13 +80,13 @@ if ! $SKIP ; then
     password=${pwd[$i]}
 
     echo Run Remote ssh-copy-id : copy key from $IPHOST to $shortname
-    /usr/bin/ssh $OPTIONS $ipaddress "/tmp/genSSH /tmp/$INVFILE true"
+    /usr/bin/ssh $OPTIONS $ipaddress "/tmp/genSSH /tmp/$BINVFILE true"
   done
 
   for ((i = 0; i < ${#ipaddr[@]}; ++i));
   do
     ipaddress=${ipaddr[$i]}
-    /usr/bin/ssh $OPTIONS $ipaddress "/bin/rm -f /tmp/${shortname}.kxy"
-    /usr/bin/ssh $OPTIONS $ipaddress "/bin/rm -f $INVFILE"
+    /usr/bin/ssh $OPTIONS $ipaddress "/bin/rm -f /tmp/${USER}.${shortname}.kxy"
+    /usr/bin/ssh $OPTIONS $ipaddress "/bin/rm -f /tmp/$BINVFILE"
   done
 fi
